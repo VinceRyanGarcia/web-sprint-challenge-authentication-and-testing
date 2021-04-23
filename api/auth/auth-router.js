@@ -1,59 +1,72 @@
 const router = require('express').Router();
 
-router.post('/register', (req, res) => {
-  res.end('implement register, please!');
-  /*
-    IMPLEMENT
-    You are welcome to build additional middlewares to help with the endpoint's functionality.
-    DO NOT EXCEED 2^8 ROUNDS OF HASHING!
+const bcrypt = require('bcryptjs')
+const jwt = require('jsonwebtoken')
+const { jwtSecret } = require('../../config/secrets')
 
-    1- In order to register a new account the client must provide `username` and `password`:
-      {
-        "username": "Captain Marvel", // must not exist already in the `users` table
-        "password": "foobar"          // needs to be hashed before it's saved
-      }
+const Users = require('../users/users-model')
+const { usernameUnique } = require('../middleware/auth-middleware')
 
-    2- On SUCCESSFUL registration,
-      the response body should have `id`, `username` and `password`:
-      {
-        "id": 1,
-        "username": "Captain Marvel",
-        "password": "2a$08$jG.wIGR2S4hxuyWNcBf9MuoC4y0dNy7qC/LbmtuFBSdIhWks2LhpG"
-      }
+// Test login information is username bagel password chomp1234
+// [x] After logging in, make a GET request on Postman by going to [Headers] 
+// then add Authorization as a key. Insert the the token as the value
 
-    3- On FAILED registration due to `username` or `password` missing from the request body,
-      the response body should include a string exactly as follows: "username and password required".
+router.post('/register', usernameUnique, (req, res, next) => {
+  const user = req.body
 
-    4- On FAILED registration due to the `username` being taken,
-      the response body should include a string exactly as follows: "username taken".
-  */
+  if (isValid(user)) {
+    //hashes the password slowly making it more annoying for brute force to attempt hacking
+    user.password = bcrypt.hashSync(user.password, process.env.BCRYPT_ROUNDS || 8) 
+
+    Users.add(user)
+      .then(user => {
+        res.status(201).json(user)
+      })
+      .catch(next)
+  } else {
+    res.status(400).json("username and password required")
+  }
 });
 
-router.post('/login', (req, res) => {
-  res.end('implement login, please!');
-  /*
-    IMPLEMENT
-    You are welcome to build additional middlewares to help with the endpoint's functionality.
+router.post('/login', (req, res, next) => {
+  const { username, password } = req.body
 
-    1- In order to log into an existing account the client must provide `username` and `password`:
-      {
-        "username": "Captain Marvel",
-        "password": "foobar"
-      }
-
-    2- On SUCCESSFUL login,
-      the response body should have `message` and `token`:
-      {
-        "message": "welcome, Captain Marvel",
-        "token": "eyJhbGciOiJIUzI ... ETC ... vUPjZYDSa46Nwz8"
-      }
-
-    3- On FAILED login due to `username` or `password` missing from the request body,
-      the response body should include a string exactly as follows: "username and password required".
-
-    4- On FAILED login due to `username` not existing in the db, or `password` being incorrect,
-      the response body should include a string exactly as follows: "invalid credentials".
-  */
+  if (isValid(req.body)) {
+    Users.getByFilter({ username })
+      .first()
+      .then(user => {
+        if (user && bcrypt.compareSync(password, user.password)) {
+          const token = buildToken(user)
+          res.json({
+            message: `welcome, ${username}`,
+            token
+          })
+        } else {
+          res.status(401).json('invalid credentials')
+        }
+      })
+      .catch(next)
+  } else {
+    res.status(401).json('username and password required')
+  }
 });
+
+function isValid(user) {
+  return Boolean(user.username && user.password && typeof user.password === "string");
+}
+
+function buildToken(user) {
+  const payload = {
+    id: user.id,
+    username: user.username,
+    password: user.password
+  }
+  const config = {
+    expiresIn: '1d',
+  }
+  return jwt.sign(
+    payload, jwtSecret, config
+  )
+}
 
 module.exports = router;
